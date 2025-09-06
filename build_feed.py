@@ -63,6 +63,23 @@ DATE_JA_RE = re.compile(r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日")
 CHAPTER_LINE_RE = re.compile(r"^第\s*\d+\s*話[^\n]*")  # 行頭「第◯◯話 …」
 CHAPTER_IN_TEXT_RE = re.compile(r"第\s*\d+\s*話[^\n　]*")  # aテキスト内から章名だけ抽出
 
+# 既存の CHAPTER_IN_TEXT_RE の下あたりに追加
+NOISE_WORDS = ("最新話を読む", "第1話を読む", "読む", "単行本", "特集", "試し読み", "掲載期間")
+
+def normalize_chapter_title(raw: str) -> str:
+    s = raw.strip()
+
+    # 「掲載期間：…」「… 読む」など以降を落とす
+    s = re.sub(r"(掲載期間[:：].*)$", "", s)
+    s = re.sub(r"(最新話を読む|第1話を読む|読む)\s*$", "", s)
+
+    # 「第◯話 …」だけを抜き出し（区切り記号で打ち切り）
+    m = re.search(r"(第\s*\d+\s*話\s*[^｜|/／\-\–—\[\(（＜<　]*?)\s*$", s)
+    if m:
+        s = m.group(1)
+
+    return s.strip()
+
 
 TZ_JST = tz.gettz("Asia/Tokyo")
 
@@ -178,52 +195,46 @@ def extract_items_from_title_page(
     items = []
     seen_titles = set()
     count = min(MAX_ITEMS, len(anchors))
-
-    # 行リストから補完するためのインデックス
     line_idx = 0
 
     for i in range(count):
         a, link = anchors[i]
         raw_text = (a.get_text(strip=True) or "").strip()
 
-        # 明確なノイズは除外（必要なら語句を足してください）
-        noise_words = ("第1話を読む", "最新話を読む", "単行本", "特集", "試し読み")
-        if any(w in raw_text for w in noise_words):
-            # 章タイトルが別に取れる可能性があるので、次へ
-            pass
-
-        # 1) aテキストから「第◯話 …」を抽出
-        chapter_title = None
+        # 1) aテキストから章名候補
         m = CHAPTER_IN_TEXT_RE.search(raw_text)
-        if m:
-            chapter_title = m.group(0).strip()
+        chapter_title = m.group(0).strip() if m else None
 
-        # 2) 近傍（兄弟/親）に「第◯話 …」が無いか軽く探す
+        # 2) 無ければ近傍→行リスト
         if not chapter_title:
-            # 同じカード内のテキストを少し広く見る
             parent = a.parent
             hops = 0
-            while parent is not None and hops < 3 and chapter_title is None:
+            while parent is not None and hops < 3 and not chapter_title:
                 t = parent.get_text(" ", strip=True)
                 m2 = CHAPTER_IN_TEXT_RE.search(t or "")
                 if m2:
-                    # ただしページ全体の最初のマッチではなく、親塊の中の最初
                     chapter_title = m2.group(0).strip()
                     break
                 parent = parent.parent
                 hops += 1
+        if not chapter_title and line_idx < len(chapter_lines):
+            chapter_title = chapter_lines[line_idx]
+            line_idx += 1
 
-        # 3) それでも取れなければ、事前に拾っておいた行リストから補完
-        if not chapter_title:
-            if line_idx < len(chapter_lines):
-                chapter_title = chapter_lines[line_idx]
-                line_idx += 1
-
-        # 4) まだ無いならスキップ（ここで初めて捨てる）
         if not chapter_title:
             continue
 
-        # 重複章名は除外
+        # 3) 正規化＋ノイズ除外
+        chapter_title = normalize_chapter_title(chapter_title)
+        if not chapter_title:
+            continue
+        if "第1話" in chapter_title:
+            # 「第1話を読む」などはノイズとして除外
+            continue
+        if any(w in raw_text for w in NOISE_WORDS) and "第" not in chapter_title:
+            continue
+
+        # 重複除外
         if chapter_title in seen_titles:
             continue
         seen_titles.add(chapter_title)
