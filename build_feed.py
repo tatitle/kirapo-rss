@@ -246,9 +246,10 @@ def extract_items_from_title_page(
     return items
 
 
-def build_feed(items: List[Tuple[datetime, str, str, str]], now: datetime) -> None:
+def build_feed(items, now):
     os.makedirs(PUBLIC_DIR, exist_ok=True)
 
+    # --- 通常のRSS (feed.xml) ---
     fg = FeedGenerator()
     fg.title(CHANNEL_TITLE)
     fg.link(href=BASE, rel="alternate")
@@ -261,7 +262,6 @@ def build_feed(items: List[Tuple[datetime, str, str, str]], now: datetime) -> No
         body_html_with_source = (
             body_html + '<br>出典: <a href="https://kirapo.jp/">きら星ポータル</a>'
         )
-
         fe = fg.add_entry()
         fe.id(link)
         fe.guid(link, permalink=True)
@@ -273,11 +273,60 @@ def build_feed(items: List[Tuple[datetime, str, str, str]], now: datetime) -> No
 
     fg.rss_file(os.path.join(PUBLIC_DIR, FEED_NAME), pretty=True)
 
-    # ルートアクセスで feed.xml へ即リダイレクト
+    # --- 互換RSS (compat.xml)：プレーンテキストのみ / content:encoded なし ---
+    fg2 = FeedGenerator()
+    fg2.title(CHANNEL_TITLE)
+    fg2.link(href=BASE, rel="alternate")
+    # HTML抜きの説明（テキストのみ）
+    fg2.description("邪神ちゃんドロップキック 最新話（非公式RSS） | 出典: https://kirapo.jp/")
+    fg2.language("ja")
+    fg2.pubDate(format_datetime(now))
+    fg2.lastBuildDate(format_datetime(now.astimezone(tz.gettz("UTC"))))
+
+    for dt, item_title, link, body_html in items:
+        # テキストのみ（タグ除去の簡易版）
+        text_desc = re.sub(r"<[^>]+>", "", body_html) + " / 出典: https://kirapo.jp/"
+        fe2 = fg2.add_entry()
+        fe2.id(link)
+        fe2.guid(link, permalink=True)
+        fe2.title(item_title)
+        fe2.link(href=link)
+        fe2.description(text_desc)
+        fe2.pubDate(format_datetime(dt))
+
+    fg2.rss_file(os.path.join(PUBLIC_DIR, "compat.xml"), pretty=True)
+
+    # --- Atom (atom.xml)：Atomの方が安定なクライアント用 ---
+    fa = FeedGenerator()
+    fa.id("https://tatitle.github.io/kirapo-rss/")  # 固定ID（適当でOK）
+    fa.title(CHANNEL_TITLE)
+    fa.link(href="https://tatitle.github.io/kirapo-rss/atom.xml", rel="self")
+    fa.link(href=BASE, rel="alternate")
+    fa.subtitle("邪神ちゃんドロップキック 最新話（非公式RSS） | 出典: https://kirapo.jp/")
+    fa.language("ja")
+    fa.updated(now.astimezone(tz.gettz("UTC")))
+
+    for dt, item_title, link, body_html in items:
+        ent = fa.add_entry()
+        ent.id(link)
+        ent.title(item_title)
+        ent.link(href=link)
+        ent.updated(dt.astimezone(tz.gettz("UTC")))
+        # AtomはcontentにHTML可（type='html'）
+        ent.content(body_html + '<br>出典: <a href="https://kirapo.jp/">きら星ポータル</a>', type='html')
+
+    fa.atom_file(os.path.join(PUBLIC_DIR, "atom.xml"))
+
+    # --- index.html（リンクを3種とも表示） ---
     index_html = f"""<!doctype html>
 <meta charset="utf-8">
 <title>{CHANNEL_TITLE}</title>
-<link rel="alternate" type="application/rss+xml" title="{CHANNEL_TITLE}" href="./{FEED_NAME}">
+<p>購読リンク：</p>
+<ul>
+  <li><a href="./{FEED_NAME}">RSS (通常)</a></li>
+  <li><a href="./compat.xml">RSS 互換 (プレーンテキスト)</a></li>
+  <li><a href="./atom.xml">Atom</a></li>
+</ul>
 <meta http-equiv="refresh" content="0; url=./{FEED_NAME}">
 <p>自動的に <a href="./{FEED_NAME}">{FEED_NAME}</a> へ移動します。</p>
 """
