@@ -61,6 +61,8 @@ CHANNEL_DESC_HTML = (
 
 DATE_JA_RE = re.compile(r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日")
 CHAPTER_LINE_RE = re.compile(r"^第\s*\d+\s*話[^\n]*")  # 行頭「第◯◯話 …」
+CHAPTER_IN_TEXT_RE = re.compile(r"第\s*\d+\s*話[^\n　]*")  # aテキスト内から章名だけ抽出
+
 
 TZ_JST = tz.gettz("Asia/Tokyo")
 
@@ -158,20 +160,34 @@ def extract_items_from_title_page(
     # タイトル（章名）は a のテキスト優先 → 無ければ chapter_lines の対応位置 → フォールバック
     items = []
     count = min(MAX_ITEMS, len(links))
+    seen_titles = set()
+
     for i in range(count):
         a, link = links[i]
-        a_text = (a.get_text(strip=True) or "").strip()
-        chapter_title = a_text
+        raw_text = (a.get_text(strip=True) or "").strip()
 
-        if not chapter_title:
-            if i < len(chapter_lines):
-                chapter_title = chapter_lines[i]
+        # 章タイトルの決定
+        chapter_title = None
 
+        # aテキストから「第◯◯話 …」だけ抜く
+        m = CHAPTER_IN_TEXT_RE.search(raw_text)
+        if m:
+            chapter_title = m.group(0).strip()
+
+        # 取れなければ、本文から行単位で拾った章タイトルを使う
+        if not chapter_title and i < len(chapter_lines):
+            chapter_title = chapter_lines[i]
+
+        # それでもなければフォールバック
         if not chapter_title:
             chapter_title = "最新話"
 
-        # 各アイテムの pubDate は base_dt（ページ公開日相当）を使う
-        dt = base_dt
+        # 同じ章名が重複したらスキップ
+        if chapter_title in seen_titles:
+            continue
+        seen_titles.add(chapter_title)
+
+        dt = base_dt  # pubDate はページ記載日（なければ実行日）
 
         body_html = f'<p>{dt.strftime("%Y-%m-%d")} <a href="{link}">{chapter_title}</a></p>'
         items.append((dt, chapter_title, link, body_html))
