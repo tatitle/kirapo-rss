@@ -182,16 +182,15 @@ def extract_items_from_title_page(
         a, link = anchors[i]
         raw_text = (a.get_text(strip=True) or "").strip()
 
-        # 章タイトルを決定：aテキストの中から「第…話 …」だけ切り出す
+        # aテキストから章タイトルを抽出（第◯話 …のみ）
         m = CHAPTER_IN_TEXT_RE.search(raw_text)
         if m:
             chapter_title = m.group(0).strip()
-        elif i < len(chapter_lines):
-            chapter_title = chapter_lines[i]
         else:
-            chapter_title = "最新話"
+            # aテキストが「第◯話 …」形式でない場合はスキップ
+            continue
 
-        # 重複章名は除外
+        # 重複はスキップ
         if chapter_title in seen_titles:
             continue
         seen_titles.add(chapter_title)
