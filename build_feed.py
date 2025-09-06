@@ -362,8 +362,8 @@ def main():
         except Exception as e:
             print(f"[warn] skip {title_url}: {e}")
 
-    # 新しい順（pubDate）で整列
-    all_items.sort(key=lambda x: x[0], reverse=True)
+    # 古い順（昇順）で整列
+    all_items.sort(key=lambda x: x[0])
 
     # 出力
     build_feed(all_items, now)
