@@ -130,65 +130,73 @@ def extract_items_from_title_page(
     now: datetime,
 ) -> List[Tuple[datetime, str, str, str]]:
     """
-    タイトルページから、ビューア直リンクと章タイトルを最大MAX_ITEMS件取得して
-    (pubdate, item_title, link, description_html) のリストで返す。
+    タイトルページから、ビューア直リンクと章タイトルを最大MAX_ITEMS件取得して返す。
+    - view_prefix への「部分一致」も許可
+    - 見つからない場合は『最新話を読む』や章名テキストからフォールバック
     """
-    # 改行保持で全テキスト取得（つながり防止）
+    # 改行保持テキスト
     txt = soup.get_text("\n", strip=True)
 
-    # ページに記載の「YYYY年M月D日」をページ全体の日付として採用
+    # ページ記載の日付（なければ now）
     base_dt = parse_site_date_anywhere(txt, default_dt=now)
 
     # 章タイトル候補（行頭「第…話 …」）
     chapter_lines = pick_chapter_lines(txt)
 
-    # ビューア直リンクを列挙（ページ内の a[href^=view_prefix]）
-    anchors = soup.select(f'a[href^="{view_prefix}"]')
-    links = []
+    # --- 1) ビューア直リンクを収集（部分一致OK） ---
+    anchors = []
     seen = set()
-    for a in anchors:
-        href = a.get("href")
-        if not href:
-            continue
-        full = urljoin(BASE, href)
-        if full in seen:
-            continue
-        seen.add(full)
-        links.append((a, full))
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if view_prefix in href:                   # ← startswith ではなく “in”
+            full = urljoin(BASE, href)
+            if full not in seen:
+                seen.add(full)
+                anchors.append((a, full))
 
-    # 上から順に MAX_ITEMS 件だけ組み合わせてアイテム化
-    # タイトル（章名）は a のテキスト優先 → 無ければ chapter_lines の対応位置 → フォールバック
+    # --- 2) 見つからなければ『最新話を読む』を拾う ---
+    if not anchors:
+        a_latest = soup.find("a", string=re.compile("最新話を読む"))
+        if a_latest and a_latest.get("href"):
+            full = urljoin(BASE, a_latest["href"])
+            anchors.append((a_latest, full))
+
+    # --- 3) それでも無ければ、章名テキストにリンクが付いているaを拾う ---
+    if not anchors:
+        for a in soup.find_all("a", href=True):
+            if CHAPTER_IN_TEXT_RE.search(a.get_text(strip=True) or ""):
+                full = urljoin(BASE, a["href"])
+                if full not in seen:
+                    seen.add(full)
+                    anchors.append((a, full))
+
+    # アンカーが1つも無ければ空（上位で警告してスキップ）
+    if not anchors:
+        return []
+
+    # 上から MAX_ITEMS 件だけアイテム化
     items = []
-    count = min(MAX_ITEMS, len(links))
     seen_titles = set()
-
+    count = min(MAX_ITEMS, len(anchors))
     for i in range(count):
-        a, link = links[i]
+        a, link = anchors[i]
         raw_text = (a.get_text(strip=True) or "").strip()
 
-        # 章タイトルの決定
-        chapter_title = None
-
-        # aテキストから「第◯◯話 …」だけ抜く
+        # 章タイトルを決定：aテキストの中から「第…話 …」だけ切り出す
         m = CHAPTER_IN_TEXT_RE.search(raw_text)
         if m:
             chapter_title = m.group(0).strip()
-
-        # 取れなければ、本文から行単位で拾った章タイトルを使う
-        if not chapter_title and i < len(chapter_lines):
+        elif i < len(chapter_lines):
             chapter_title = chapter_lines[i]
-
-        # それでもなければフォールバック
-        if not chapter_title:
+        else:
             chapter_title = "最新話"
 
-        # 同じ章名が重複したらスキップ
+        # 重複章名は除外
         if chapter_title in seen_titles:
             continue
         seen_titles.add(chapter_title)
 
-        dt = base_dt  # pubDate はページ記載日（なければ実行日）
-
+        dt = base_dt
         body_html = f'<p>{dt.strftime("%Y-%m-%d")} <a href="{link}">{chapter_title}</a></p>'
         items.append((dt, chapter_title, link, body_html))
 
