@@ -178,19 +178,52 @@ def extract_items_from_title_page(
     items = []
     seen_titles = set()
     count = min(MAX_ITEMS, len(anchors))
+
+    # 行リストから補完するためのインデックス
+    line_idx = 0
+
     for i in range(count):
         a, link = anchors[i]
         raw_text = (a.get_text(strip=True) or "").strip()
 
-        # aテキストから章タイトルを抽出（第◯話 …のみ）
+        # 明確なノイズは除外（必要なら語句を足してください）
+        noise_words = ("第1話を読む", "最新話を読む", "単行本", "特集", "試し読み")
+        if any(w in raw_text for w in noise_words):
+            # 章タイトルが別に取れる可能性があるので、次へ
+            pass
+
+        # 1) aテキストから「第◯話 …」を抽出
+        chapter_title = None
         m = CHAPTER_IN_TEXT_RE.search(raw_text)
         if m:
             chapter_title = m.group(0).strip()
-        else:
-            # aテキストが「第◯話 …」形式でない場合はスキップ
+
+        # 2) 近傍（兄弟/親）に「第◯話 …」が無いか軽く探す
+        if not chapter_title:
+            # 同じカード内のテキストを少し広く見る
+            parent = a.parent
+            hops = 0
+            while parent is not None and hops < 3 and chapter_title is None:
+                t = parent.get_text(" ", strip=True)
+                m2 = CHAPTER_IN_TEXT_RE.search(t or "")
+                if m2:
+                    # ただしページ全体の最初のマッチではなく、親塊の中の最初
+                    chapter_title = m2.group(0).strip()
+                    break
+                parent = parent.parent
+                hops += 1
+
+        # 3) それでも取れなければ、事前に拾っておいた行リストから補完
+        if not chapter_title:
+            if line_idx < len(chapter_lines):
+                chapter_title = chapter_lines[line_idx]
+                line_idx += 1
+
+        # 4) まだ無いならスキップ（ここで初めて捨てる）
+        if not chapter_title:
             continue
 
-        # 重複はスキップ
+        # 重複章名は除外
         if chapter_title in seen_titles:
             continue
         seen_titles.add(chapter_title)
