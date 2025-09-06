@@ -98,8 +98,21 @@ def main():
         fe.pubDate(format_datetime(dt))
 
     os.makedirs("public", exist_ok=True)
+    # RSS本体
     fg.rss_file("public/feed.xml", pretty=True)
-    print(f"OK: {len(items)} items -> public/feed.xml")
+
+    # 追加: ルートで404にしないための index.html を自動生成（feed.xmlへ即リダイレクト）
+    index_html = """<!doctype html>
+<meta charset="utf-8">
+<title>きら星ポータル 非公式RSS</title>
+<link rel="alternate" type="application/rss+xml" title="きら星ポータル 非公式RSS" href="./feed.xml">
+<meta http-equiv="refresh" content="0; url=./feed.xml">
+<p>自動的に <a href="./feed.xml">feed.xml</a> へ移動します。</p>
+"""
+    with open("public/index.html", "w", encoding="utf-8") as f:
+        f.write(index_html)
+
+    print(f"OK: {len(items)} items -> public/feed.xml (+ index.html)")
 
 if __name__ == "__main__":
     main()
