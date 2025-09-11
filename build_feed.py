@@ -23,10 +23,12 @@ from requests.adapters import HTTPAdapter, Retry
 BASE = "https://kirapo.jp/"
 
 TARGET_TITLE_PAGES = [
+    # 既存の単一フィード（後方互換用）
     "https://kirapo.jp/meteor/titles/jyashin",  # 邪神ちゃんドロップキック
 ]
 
 VIEW_PREFIX_MAP = {
+    # 既存の単一フィード（後方互換用）
     "https://kirapo.jp/meteor/titles/jyashin": "/pt/meteor/jyashin/",
 }
 
@@ -39,9 +41,44 @@ TIMEOUT = 20
 
 PUBLIC_DIR = "public"
 ATOM_NAME = "atom.xml"
+RSS_NAME = "compat.xml"  # 互換用（RSS 2.0）
 
 CHANNEL_TITLE = "邪神ちゃんドロップキック"
 CHANNEL_SUBTITLE = "邪神ちゃんドロップキック 最新話（非公式Atom） | 出典: https://kirapo.jp/"
+
+# 複数RSS出力用のフィード設定（必要に応じて配列に追加）
+# - name: 識別用スラグ（ファイル名に使用）
+# - channel_title/subtitle: フィードの表示名
+# - atom_name: 出力ファイル名（public/ 配下）
+# - title_pages: 作品タイトルページのURLリスト
+# - view_prefix_map: 各タイトルページに対応する閲覧パスの接頭辞
+FEEDS = [
+    {
+        "name": "jyashin",
+        "channel_title": "邪神ちゃんドロップキック",
+        "channel_subtitle": "邪神ちゃんドロップキック 最新話（非公式Atom） | 出典: https://kirapo.jp/",
+        "atom_name": "atom-jyashin.xml",
+        "title_pages": [
+            "https://kirapo.jp/meteor/titles/jyashin",
+        ],
+        "view_prefix_map": {
+            "https://kirapo.jp/meteor/titles/jyashin": "/pt/meteor/jyashin/",
+        },
+    },
+    # 例: 別作品を追加する場合
+    # {
+    #     "name": "<slug>",
+    #     "channel_title": "<作品名>",
+    #     "channel_subtitle": "<説明>",
+    #     "atom_name": "atom-<slug>.xml",
+    #     "title_pages": [
+    #         "https://kirapo.jp/<label>/titles/<slug>",
+    #     ],
+    #     "view_prefix_map": {
+    #         "https://kirapo.jp/<label>/titles/<slug>": "/pt/<label>/<slug>/",
+    #     },
+    # },
+]
 
 # =====================
 
@@ -184,15 +221,26 @@ def extract_items_from_title_page(
     return items
 
 
-def build_feed(items: List[Tuple[datetime, str, str, str]], now: datetime) -> None:
+def write_atom(
+    items: List[Tuple[datetime, str, str, str]],
+    now: datetime,
+    *,
+    channel_title: str,
+    channel_subtitle: str,
+    atom_name: str,
+) -> None:
     os.makedirs(PUBLIC_DIR, exist_ok=True)
 
     fa = FeedGenerator()
-    fa.id("https://tatitle.github.io/kirapo-rss/")  # 固定ID
-    fa.title(CHANNEL_TITLE)
-    fa.link(href="https://tatitle.github.io/kirapo-rss/atom.xml", rel="self")
+    fa.id("https://tatitle.github.io/kirapo-rss/")  # 固定ID（フィード共通）
+    fa.title(channel_title)
+    fa.link(
+        href=f"https://tatitle.github.io/kirapo-rss/{atom_name}",
+        rel="self",
+        type="application/atom+xml",
+    )
     fa.link(href=BASE, rel="alternate")
-    fa.subtitle(CHANNEL_SUBTITLE)
+    fa.subtitle(channel_subtitle)
     fa.language("ja")
     fa.updated(now.astimezone(tz.gettz("UTC")))
 
@@ -205,18 +253,116 @@ def build_feed(items: List[Tuple[datetime, str, str, str]], now: datetime) -> No
         ent.updated((dt + timedelta(minutes=idx)).astimezone(tz.gettz("UTC")))
         ent.content(body_html + '<br>出典: <a href="https://kirapo.jp/">きら星ポータル</a>', type='html')
 
-    fa.atom_file(os.path.join(PUBLIC_DIR, ATOM_NAME))
+    fa.atom_file(os.path.join(PUBLIC_DIR, atom_name))
 
-    # ルート -> atom.xml に即リダイレクト
+
+def write_rss(
+    items: List[Tuple[datetime, str, str, str]],
+    now: datetime,
+    *,
+    channel_title: str,
+    channel_subtitle: str,
+    rss_name: str,
+) -> None:
+    os.makedirs(PUBLIC_DIR, exist_ok=True)
+
+    fr = FeedGenerator()
+    fr.id("https://tatitle.github.io/kirapo-rss/")  # 固定ID（フィード共通）
+    fr.title(channel_title)
+    fr.link(
+        href=f"https://tatitle.github.io/kirapo-rss/{rss_name}",
+        rel="self",
+        type="application/rss+xml",
+    )
+    fr.link(href=BASE, rel="alternate")
+    fr.subtitle(channel_subtitle)
+    fr.language("ja")
+    fr.updated(now.astimezone(tz.gettz("UTC")))
+
+    for idx, (dt, item_title, link, body_html) in enumerate(items):
+        ent = fr.add_entry()
+        ent.id(link)
+        ent.title(item_title)
+        ent.link(href=link)
+        ent.updated((dt + timedelta(minutes=idx)).astimezone(tz.gettz("UTC")))
+        # RSS 2.0 は description を使用（HTML許容）
+        ent.description(body_html + '<br>出典: <a href="https://kirapo.jp/">きら星ポータル</a>')
+
+    fr.rss_file(os.path.join(PUBLIC_DIR, rss_name))
+
+
+def build_feed(items: List[Tuple[datetime, str, str, str]], now: datetime) -> None:
+    """後方互換: 既存の単一フィード(atom.xml)を生成し、index.htmlでリダイレクト。
+
+    従来のワークフローが参照している `public/atom.xml` のみを対象。
+    複数フィードは main() 後半で別途生成する。
+    """
+    write_atom(
+        items,
+        now,
+        channel_title=CHANNEL_TITLE,
+        channel_subtitle=CHANNEL_SUBTITLE,
+        atom_name=ATOM_NAME,
+    )
+    # 互換用RSSも同時出力
+    write_rss(
+        items,
+        now,
+        channel_title=CHANNEL_TITLE,
+        channel_subtitle=CHANNEL_SUBTITLE,
+        rss_name=RSS_NAME,
+    )
+
+    # ルート -> atom.xml に即リダイレクト（既存の挙動を維持）
+    abs_atom_url = f"https://tatitle.github.io/kirapo-rss/{ATOM_NAME}"
+    abs_rss_url = f"https://tatitle.github.io/kirapo-rss/{RSS_NAME}"
     index_html = f"""<!doctype html>
 <meta charset="utf-8">
 <title>{CHANNEL_TITLE}</title>
-<link rel="alternate" type="application/atom+xml" title="{CHANNEL_TITLE}" href="./{ATOM_NAME}">
-<meta http-equiv="refresh" content="0; url=./{ATOM_NAME}">
-<p>自動的に <a href="./{ATOM_NAME}">{ATOM_NAME}</a> へ移動します。</p>
+<link rel="alternate" type="application/atom+xml" title="{CHANNEL_TITLE}" href="{abs_atom_url}">
+<link rel="alternate" type="application/rss+xml" title="{CHANNEL_TITLE} (RSS互換)" href="{abs_rss_url}">
+<meta http-equiv="refresh" content="0; url={abs_atom_url}">
+<p>自動的に <a href="{abs_atom_url}">{ATOM_NAME}</a> へ移動します。RSS互換版は <a href="{abs_rss_url}">{RSS_NAME}</a>。</p>
 """
     with open(os.path.join(PUBLIC_DIR, "index.html"), "w", encoding="utf-8") as f:
         f.write(index_html)
+
+
+def collect_items_for(
+    session: requests.Session,
+    title_pages: List[str],
+    view_prefix_map: dict,
+    now: datetime,
+) -> List[Tuple[datetime, str, str, str]]:
+    """指定のタイトルページ群からアイテムを収集し、章番号で昇順に整列。"""
+    items_all: List[Tuple[datetime, str, str, str]] = []
+    for title_url in title_pages:
+        try:
+            soup = get_soup(session, title_url)
+            view_prefix = view_prefix_map.get(title_url)
+            if not view_prefix:
+                m = re.search(r"https://kirapo\.jp/([^/]+)/titles/([^/]+)", title_url)
+                if m:
+                    label, slug = m.group(1), m.group(2)
+                    view_prefix = f"/pt/{label}/{slug}/"
+                else:
+                    print(f"[warn] VIEW_PREFIX not found for {title_url}")
+                    continue
+            items = extract_items_from_title_page(soup, title_url, view_prefix, now)
+            items_all.extend(items)
+            time.sleep(DELAY_TITLE_PAGE)
+        except Exception as e:
+            print(f"[warn] skip {title_url}: {e}")
+
+    def _ch_no_or_date(item):
+        dt, title, link, body = item
+        m = CH_NO_RE.search(title)
+        if m:
+            return (int(m.group(1)), dt)
+        return (10**9, dt)
+
+    items_all.sort(key=_ch_no_or_date)
+    return items_all
 
 
 def main():
@@ -257,6 +403,56 @@ def main():
     build_feed(all_items, now)
     time.sleep(DELAY_AFTER_BUILD)
     print(f"OK: {len(all_items)} item(s) -> {os.path.join(PUBLIC_DIR, ATOM_NAME)} (+ index.html)")
+
+    # ---- 複数RSS（個別フィード）を生成 ----
+    generated = []
+    for feed in FEEDS:
+        items = collect_items_for(
+            session=session,
+            title_pages=feed.get("title_pages", []),
+            view_prefix_map=feed.get("view_prefix_map", {}),
+            now=now,
+        )
+        if not items:
+            print(f"[warn] no items for feed: {feed.get('name')}")
+            continue
+
+        atom_name = feed.get("atom_name") or f"atom-{feed.get('name','feed')}.xml"
+        write_atom(
+            items,
+            now,
+            channel_title=feed.get("channel_title", "Kirapo 非公式フィード"),
+            channel_subtitle=feed.get("channel_subtitle", "きら星ポータル 非公式Atom | 出典: https://kirapo.jp/"),
+            atom_name=atom_name,
+        )
+        # 任意でRSS互換ファイルも出力（キー: rss_name）
+        rss_name = feed.get("rss_name")
+        if rss_name:
+            write_rss(
+                items,
+                now,
+                channel_title=feed.get("channel_title", "Kirapo 非公式フィード"),
+                channel_subtitle=feed.get("channel_subtitle", "きら星ポータル 非公式Atom | 出典: https://kirapo.jp/"),
+                rss_name=rss_name,
+            )
+
+        generated.append((feed.get("channel_title", feed.get("name", "feed")), atom_name))
+
+    # 一覧ページ（feeds.html）を生成（任意参照用）
+    if generated:
+        lines = [
+            "<!doctype html>",
+            "<meta charset=\"utf-8\">",
+            "<title>Kirapo 非公式フィード一覧</title>",
+            "<h1>Kirapo 非公式フィード一覧</h1>",
+            "<ul>",
+        ]
+        for title, fname in generated:
+            lines.append(f"  <li><a href=\"./{fname}\">{title}</a> ({fname})</li>")
+        lines.append("</ul>")
+        with open(os.path.join(PUBLIC_DIR, "feeds.html"), "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        print(f"OK: generated {len(generated)} feed(s) -> feeds.html list")
 
 
 if __name__ == "__main__":
