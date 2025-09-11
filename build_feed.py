@@ -36,7 +36,7 @@ MAX_ITEMS = 5
 DELAY_TITLE_PAGE = 0.3
 DELAY_AFTER_BUILD = 0.1
 
-HEADERS = {"User-Agent": "KirapoRSS/Atom/1.0 (+https://github.com/)"}
+HEADERS = {"User-Agent": "kirapo-jyashin-rss/1.0 (+https://github.com/)"}
 TIMEOUT = 20
 
 PUBLIC_DIR = "public"
@@ -232,10 +232,10 @@ def write_atom(
     os.makedirs(PUBLIC_DIR, exist_ok=True)
 
     fa = FeedGenerator()
-    fa.id("https://tatitle.github.io/kirapo-rss/")  # 固定ID（フィード共通）
+    fa.id("https://tatitle.github.io/kirapo-jyashin-rss/")  # 固定ID（フィード共通）
     fa.title(channel_title)
     fa.link(
-        href=f"https://tatitle.github.io/kirapo-rss/{atom_name}",
+        href=f"https://tatitle.github.io/kirapo-jyashin-rss/{atom_name}",
         rel="self",
         type="application/atom+xml",
     )
@@ -267,10 +267,10 @@ def write_rss(
     os.makedirs(PUBLIC_DIR, exist_ok=True)
 
     fr = FeedGenerator()
-    fr.id("https://tatitle.github.io/kirapo-rss/")  # 固定ID（フィード共通）
+    fr.id("https://tatitle.github.io/kirapo-jyashin-rss/")  # 固定ID（フィード共通）
     fr.title(channel_title)
     fr.link(
-        href=f"https://tatitle.github.io/kirapo-rss/{rss_name}",
+        href=f"https://tatitle.github.io/kirapo-jyashin-rss/{rss_name}",
         rel="self",
         type="application/rss+xml",
     )
@@ -314,8 +314,8 @@ def build_feed(items: List[Tuple[datetime, str, str, str]], now: datetime) -> No
     )
 
     # ルート -> atom.xml に即リダイレクト（既存の挙動を維持）
-    abs_atom_url = f"https://tatitle.github.io/kirapo-rss/{ATOM_NAME}"
-    abs_rss_url = f"https://tatitle.github.io/kirapo-rss/{RSS_NAME}"
+    abs_atom_url = f"{ATOM_NAME}"
+    abs_rss_url = f"{RSS_NAME}"
     index_html = f"""<!doctype html>
 <meta charset="utf-8">
 <title>{CHANNEL_TITLE}</title>
