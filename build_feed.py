@@ -269,22 +269,27 @@ def write_rss(
     fr = FeedGenerator()
     fr.id("https://tatitle.github.io/kirapo-jyashin-rss/")  # 固定ID（フィード共通）
     fr.title(channel_title)
+    # RSS 2.0 の自己参照リンクは atom:link 拡張として付与される
     fr.link(
         href=f"https://tatitle.github.io/kirapo-jyashin-rss/{rss_name}",
         rel="self",
         type="application/rss+xml",
     )
     fr.link(href=BASE, rel="alternate")
-    fr.subtitle(channel_subtitle)
+    # RSS 2.0 では channel/description を使用
+    fr.description(channel_subtitle)
     fr.language("ja")
-    fr.updated(now.astimezone(tz.gettz("UTC")))
+    # RSS 2.0 では lastBuildDate を設定
+    fr.lastBuildDate(now.astimezone(tz.gettz("UTC")))
 
     for idx, (dt, item_title, link, body_html) in enumerate(items):
         ent = fr.add_entry()
-        ent.id(link)
+        # RSS 2.0 では guid を明示、permalink を true に
+        ent.guid(link, permalink=True)
         ent.title(item_title)
         ent.link(href=link)
-        ent.updated((dt + timedelta(minutes=idx)).astimezone(tz.gettz("UTC")))
+        # RSS 2.0 では pubDate を使用
+        ent.pubDate((dt + timedelta(minutes=idx)).astimezone(tz.gettz("UTC")))
         # RSS 2.0 は description を使用（HTML許容）
         ent.description(body_html + '<br>出典: <a href="https://kirapo.jp/">きら星ポータル</a>')
 
