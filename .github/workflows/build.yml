@@ -3,7 +3,7 @@ name: build-and-deploy
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 */6 * * *"  # 6時間おき（UTC）
+    - cron: "0 */6 * * *"   # 6時間おき（UTC）
 
 permissions:
   contents: read
@@ -13,6 +13,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
     steps:
       - uses: actions/checkout@v4
 
@@ -28,16 +30,33 @@ jobs:
       - name: Generate feed
         run: python build_feed.py
 
+      - name: Compare with live feed
+        id: diff
+        shell: bash
+        run: |
+          set -e
+          curl -fsSL "https://tatitle.github.io/kirapo-rss/feed.xml" -o live.xml || true
+          if [ -f live.xml ] && cmp -s live.xml public/feed.xml ; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No change in feed.xml"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Feed changed"
+          fi
+
       - name: Setup Pages
+        if: steps.diff.outputs.changed == 'true'
         uses: actions/configure-pages@v5
 
       - name: Upload artifact
+        if: steps.diff.outputs.changed == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
           path: public
 
   deploy:
     needs: build
+    if: needs.build.outputs.changed == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
