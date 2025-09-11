@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-きら星ポータル 非公式RSS（邪神ちゃんドロップキック）
-- 作品ページ（タイトルページ）からビューア直リンク /pt/... を抽出し、最新N件をRSS化
-- 章番号で昇順（古い→新しい）に整列
+きら星ポータル 非公式Atomフィード（邪神ちゃんドロップキック）
+- タイトルページから /pt/... の各話リンクを抽出して最新N件をAtom化
+- 章番号で昇順（古→新）整列、各エントリ updated は上から+1分ずつ
 """
 
 import os
@@ -15,16 +15,15 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 from dateutil import tz
-from email.utils import format_datetime
 from feedgen.feed import FeedGenerator
 from requests.adapters import HTTPAdapter, Retry
 
-# ======= 設定 ====================================
+# ======= 設定 =======
 
 BASE = "https://kirapo.jp/"
 
 TARGET_TITLE_PAGES = [
-    "https://kirapo.jp/meteor/titles/jyashin",
+    "https://kirapo.jp/meteor/titles/jyashin",  # 邪神ちゃんドロップキック
 ]
 
 VIEW_PREFIX_MAP = {
@@ -35,25 +34,21 @@ MAX_ITEMS = 5
 DELAY_TITLE_PAGE = 0.3
 DELAY_AFTER_BUILD = 0.1
 
-HEADERS = {"User-Agent": "KirapoRSS/1.4 (GitHub-Actions; +https://github.com/)"}
+HEADERS = {"User-Agent": "KirapoRSS/Atom/1.0 (+https://github.com/)"}
 TIMEOUT = 20
 
 PUBLIC_DIR = "public"
-FEED_NAME = "feed.xml"
+ATOM_NAME = "atom.xml"
 
 CHANNEL_TITLE = "邪神ちゃんドロップキック"
-CHANNEL_DESC_HTML = (
-    '邪神ちゃんドロップキック 最新話（非公式RSS）｜出典: '
-    '<a href="https://kirapo.jp/">きら星ポータル</a>'
-)
+CHANNEL_SUBTITLE = "邪神ちゃんドロップキック 最新話（非公式Atom） | 出典: https://kirapo.jp/"
 
-# =================================================
+# =====================
 
 DATE_JA_RE = re.compile(r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日")
-CHAPTER_LINE_RE = re.compile(r"^第\s*\d+\s*話[^\n]*")
-CHAPTER_IN_TEXT_RE = re.compile(r"第\s*\d+\s*話[^\n　]*")
-CH_NO_RE = re.compile(r"第\s*(\d+)\s*話")  # 章番号抽出
-
+CHAPTER_LINE_RE = re.compile(r"^第\s*\d+\s*話[^\n]*")        # 行頭「第◯◯話 …」
+CHAPTER_IN_TEXT_RE = re.compile(r"第\s*\d+\s*話[^\n　]*")    # aテキスト内「第◯◯話 …」
+CH_NO_RE = re.compile(r"第\s*(\d+)\s*話")                   # 章番号
 NOISE_WORDS = ("最新話を読む", "第1話を読む", "読む", "単行本", "特集", "試し読み", "掲載期間")
 
 TZ_JST = tz.gettz("Asia/Tokyo")
@@ -152,7 +147,6 @@ def extract_items_from_title_page(
         a, link = anchors[i]
         raw_text = (a.get_text(strip=True) or "").strip()
 
-        # ノイズ語を多く含む場合、後で正規化に任せつつ近傍や行から補完
         m = CHAPTER_IN_TEXT_RE.search(raw_text)
         chapter_title = m.group(0).strip() if m else None
 
@@ -184,9 +178,8 @@ def extract_items_from_title_page(
             continue
         seen_titles.add(chapter_title)
 
-        dt = base_dt
-        body_html = f'<p>{dt.strftime("%Y-%m-%d")} <a href="{link}">{chapter_title}</a></p>'
-        items.append((dt, chapter_title, link, body_html))
+        body_html = f'<p><a href="{link}">{chapter_title}</a></p>'
+        items.append((base_dt, chapter_title, link, body_html))
 
     return items
 
@@ -194,38 +187,33 @@ def extract_items_from_title_page(
 def build_feed(items: List[Tuple[datetime, str, str, str]], now: datetime) -> None:
     os.makedirs(PUBLIC_DIR, exist_ok=True)
 
-    fg = FeedGenerator()
-    fg.title(CHANNEL_TITLE)
-    fg.link(href=BASE, rel="alternate")
-    fg.description(CHANNEL_DESC_HTML)
-    fg.language("ja")
-    fg.pubDate(format_datetime(now))
-    fg.lastBuildDate(format_datetime(now.astimezone(tz.gettz("UTC"))))
+    fa = FeedGenerator()
+    fa.id("https://tatitle.github.io/kirapo-rss/")  # 固定ID
+    fa.title(CHANNEL_TITLE)
+    fa.link(href="https://tatitle.github.io/kirapo-rss/atom.xml", rel="self")
+    fa.link(href=BASE, rel="alternate")
+    fa.subtitle(CHANNEL_SUBTITLE)
+    fa.language("ja")
+    fa.updated(now.astimezone(tz.gettz("UTC")))
 
-    # pubDateに微オフセット（古い→新しい順で +1分ずつ）
+    # Atom entry を古→新の順で +1分ずつ updated を進める
     for idx, (dt, item_title, link, body_html) in enumerate(items):
-        body_html_with_source = (
-            body_html + '<br>出典: <a href="https://kirapo.jp/">きら星ポータル</a>'
-        )
-        dt_adj = dt + timedelta(minutes=idx)
+        ent = fa.add_entry()
+        ent.id(link)
+        ent.title(item_title)
+        ent.link(href=link)
+        ent.updated((dt + timedelta(minutes=idx)).astimezone(tz.gettz("UTC")))
+        ent.content(body_html + '<br>出典: <a href="https://kirapo.jp/">きら星ポータル</a>', type='html')
 
-        fe = fg.add_entry()
-        fe.id(link)
-        fe.guid(link, permalink=True)
-        fe.title(item_title)
-        fe.link(href=link)
-        fe.description(body_html_with_source)
-        fe.content(content=body_html_with_source, type="CDATA")
-        fe.pubDate(format_datetime(dt_adj))
+    fa.atom_file(os.path.join(PUBLIC_DIR, ATOM_NAME))
 
-    fg.rss_file(os.path.join(PUBLIC_DIR, FEED_NAME), pretty=True)
-
+    # ルート -> atom.xml に即リダイレクト
     index_html = f"""<!doctype html>
 <meta charset="utf-8">
 <title>{CHANNEL_TITLE}</title>
-<link rel="alternate" type="application/rss+xml" title="{CHANNEL_TITLE}" href="./{FEED_NAME}">
-<meta http-equiv="refresh" content="0; url=./{FEED_NAME}">
-<p>自動的に <a href="./{FEED_NAME}">{FEED_NAME}</a> へ移動します。</p>
+<link rel="alternate" type="application/atom+xml" title="{CHANNEL_TITLE}" href="./{ATOM_NAME}">
+<meta http-equiv="refresh" content="0; url=./{ATOM_NAME}">
+<p>自動的に <a href="./{ATOM_NAME}">{ATOM_NAME}</a> へ移動します。</p>
 """
     with open(os.path.join(PUBLIC_DIR, "index.html"), "w", encoding="utf-8") as f:
         f.write(index_html)
@@ -256,7 +244,7 @@ def main():
         except Exception as e:
             print(f"[warn] skip {title_url}: {e}")
 
-    # ---- 並び順：章番号で昇順（古い→新しい） ----
+    # ---- 並び順：章番号で昇順（古→新） ----
     def _ch_no_or_date(item):
         dt, title, link, body = item
         m = CH_NO_RE.search(title)
@@ -268,7 +256,7 @@ def main():
 
     build_feed(all_items, now)
     time.sleep(DELAY_AFTER_BUILD)
-    print(f"OK: {len(all_items)} item(s) -> {os.path.join(PUBLIC_DIR, FEED_NAME)} (+ index.html)")
+    print(f"OK: {len(all_items)} item(s) -> {os.path.join(PUBLIC_DIR, ATOM_NAME)} (+ index.html)")
 
 
 if __name__ == "__main__":
