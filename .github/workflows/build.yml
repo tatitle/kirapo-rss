@@ -27,21 +27,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Generate feed
+      - name: Generate feed (Atom)
         run: python build_feed.py
 
-      - name: Compare with live feed
+      - name: Compare with live atom.xml
         id: diff
         shell: bash
         run: |
           set -e
-          curl -fsSL "https://tatitle.github.io/kirapo-rss/feed.xml" -o live.xml || true
-          if [ -f live.xml ] && cmp -s live.xml public/feed.xml ; then
+          curl -fsSL "https://tatitle.github.io/kirapo-rss/atom.xml" -o live.xml || true
+          if [ -f live.xml ] && cmp -s live.xml public/atom.xml ; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No change in feed.xml"
+            echo "No change in atom.xml"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "Feed changed"
+            echo "Atom feed changed"
           fi
 
       - name: Setup Pages
